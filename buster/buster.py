@@ -2,7 +2,7 @@
 
 Usage:
   buster.py setup [--gh-repo=<repo-url>] [--dir=<path>]
-  buster.py generate [--domain=<local-address>] [--dir=<path>]
+  buster.py generate [--domain=<local-address>] [--dir=<path>] [--no-assets-versioning]
   buster.py preview [--dir=<path>]
   buster.py deploy [--dir=<path>]
   buster.py add-domain <domain-name> [--dir=<path>]
@@ -15,12 +15,14 @@ Options:
   --dir=<path>              Absolute path of directory to store static pages.
   --domain=<local-address>  Address of local ghost installation [default: local.tryghost.org].
   --gh-repo=<repo-url>      URL of your gh-pages repository.
+  --no-assets-versioning    Remove version info from the filename of assets.
 """
 
 import os
 import re
 import sys
 import shutil
+import platform
 import SocketServer
 import SimpleHTTPServer
 from docopt import docopt
@@ -36,7 +38,17 @@ def main():
         static_path = os.path.join(os.getcwd(), 'static')
 
     if arguments['generate']:
-        command = ("wget \\"
+        if platform.system() == "Windows":
+            command = ("wget "
+                       "--recursive "             # follow links to download entire site
+                       "--convert-links "         # make links relative
+                       "--page-requisites "       # grab everything: css / inlined images
+                       "--no-parent "             # don't go to parent level
+                       "--directory-prefix {1} "  # download contents to static/ folder
+                       "--no-host-directories "   # don't create domain named folder
+                       "{0}").format(arguments['--domain'], static_path)
+        else:
+            command = ("wget \\"
                    "--recursive \\"             # follow links to download entire site
                    "--convert-links \\"         # make links relative
                    "--page-requisites \\"       # grab everything: css / inlined images
@@ -44,7 +56,13 @@ def main():
                    "--directory-prefix {1} \\"  # download contents to static/ folder
                    "--no-host-directories \\"   # don't create domain named folder
                    "{0}").format(arguments['--domain'], static_path)
+
         os.system(command)
+
+        no_versioning = False
+        if arguments["--no-assets-versioning"]:
+            no_versioning = True
+            versioned_assets = []
 
         # remove query string since Ghost 0.4
         file_regex = re.compile(r'.*?(\?.*)')
@@ -54,6 +72,23 @@ def main():
                     newname = re.sub(r'\?.*', '', filename)
                     print "Rename", filename, "=>", newname
                     os.rename(os.path.join(root, filename), os.path.join(root, newname))
+
+                if no_versioning and ("@v=" in filename):
+                    versioned_assets.append(filename)
+
+        if no_versioning:
+            for root, dirs, filenames in os.walk(static_path):
+                for filename in filenames:
+                    data = None
+                    with open(os.path.join(root, filename), 'r') as open_file:
+                        data = open_file.read()
+                    for asset_file in versioned_assets:
+                        new_filename = asset_file.split("@v=", 1)[0]
+                        data = data.replace(asset_file, new_filename)
+                    with open(os.path.join(root, filename), 'w') as open_file:
+                        open_file.write(data)
+                    if filename in versioned_assets:
+                        os.rename(os.path.join(root, filename), os.path.join(root, filename.split("@v=", 1)[0]))
 
     elif arguments['preview']:
         os.chdir(static_path)
