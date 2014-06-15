@@ -2,7 +2,7 @@
 
 Usage:
   buster.py setup [--gh-repo=<repo-url>] [--dir=<path>]
-  buster.py generate [--domain=<local-address>] [--dir=<path>] [--no-assets-versioning]
+  buster.py generate [--domain=<local-address>] [--dir=<path>] [--no-assets-versioning] [--rss-summaries]
   buster.py preview [--dir=<path>]
   buster.py deploy [--dir=<path>]
   buster.py add-domain <domain-name> [--dir=<path>]
@@ -16,6 +16,7 @@ Options:
   --domain=<local-address>  Address of local ghost installation [default: local.tryghost.org].
   --gh-repo=<repo-url>      URL of your gh-pages repository.
   --no-assets-versioning    Remove version info from the filename of assets.
+  --rss-summaries           Show only summaries in the rss feed
 """
 
 import os
@@ -25,6 +26,7 @@ import shutil
 import platform
 import SocketServer
 import SimpleHTTPServer
+import xml.etree.ElementTree as ElementTree
 from docopt import docopt
 from time import gmtime, strftime
 from git import Repo
@@ -89,6 +91,41 @@ def main():
                         open_file.write(data)
                     if filename in versioned_assets:
                         os.rename(os.path.join(root, filename), os.path.join(root, filename.split("@v=", 1)[0]))
+
+        if arguments["--rss-summaries"]:
+
+            original_escape_cdata = ElementTree._escape_cdata
+            def _escape_cdata(text, encoding):
+                if "<![CDATA[" in text:
+                    try:
+                        return text.encode(encoding, "xmlcharrefreplace")
+                    except (TypeError, AttributeError):
+                        ElementTree._raise_serialization_error(text)
+                else:
+                    return original_escape_cdata(text, encoding)
+            ElementTree._escape_cdata = _escape_cdata
+                        
+            for root, dirs, filenames in os.walk(static_path):
+                if root.rsplit("\\", 1)[1] == "rss":
+                    tree = ElementTree.parse(os.path.join(root, filename))
+                    xml_root = tree.getroot()
+                    is_title = True
+                    for description in xml_root.iter("description"):
+                        if is_title:
+                            is_title = False
+                        else:
+                            summary = description.text
+                            #modify the summary
+                            summary = " ".join(summary.split()[:50]) + " ..."
+                            
+                            #limit summary to one paragraph
+                            if "<p>" in summary:
+                                summary = summary.split("</p>",1)[0]
+                                summary = summary + "</p>"
+                            summary = "<![CDATA[" + summary + "]]>"
+
+                            description.text = summary
+                    tree.write(os.path.join(root, filename))
 
     elif arguments['preview']:
         os.chdir(static_path)
