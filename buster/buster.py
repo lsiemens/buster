@@ -2,7 +2,7 @@
 
 Usage:
   buster.py setup [--gh-repo=<repo-url>] [--dir=<path>]
-  buster.py generate [--domain=<local-address>] [--dir=<path>] [--no-assets-versioning] [--rss-summaries]
+  buster.py generate [--domain=<local-address>] [--dir=<path>] [--no-assets-versioning] [--rss-summaries] [--create-sitemap] [--site-url=<URL>]
   buster.py preview [--dir=<path>]
   buster.py deploy [--dir=<path>]
   buster.py add-domain <domain-name> [--dir=<path>]
@@ -17,6 +17,8 @@ Options:
   --gh-repo=<repo-url>      URL of your gh-pages repository.
   --no-assets-versioning    Remove version info from the filename of assets.
   --rss-summaries           Show only summaries in the rss feed
+  --create-sitemap          Generate an xml site map
+  --site-url=<URL>          URL of the website
 """
 
 import os
@@ -28,6 +30,7 @@ import SocketServer
 import SimpleHTTPServer
 import xml.etree.ElementTree as ElementTree
 from docopt import docopt
+from datetime import date
 from time import gmtime, strftime
 from git import Repo
 
@@ -92,8 +95,34 @@ def main():
                     if filename in versioned_assets:
                         os.rename(os.path.join(root, filename), os.path.join(root, filename.split("@v=", 1)[0]))
 
-        if arguments["--rss-summaries"]:
+        if arguments["--create-sitemap"]:
+            if arguments['--site-url']:
+                site_url = arguments['--site-url']
+            else:
+                site_url = raw_input("Enter the website URL: ").strip()
+            if not ("http" in site_url):
+                site_url = "http://" + site_url
 
+            date_today = date.today()
+            site_map = ""
+            site_map_header = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">\n"
+            site_map_footer = "</urlset>"
+            for root, dirs, filenames in os.walk(static_path):
+                for filename in filenames:
+                    if ".html" in filename:
+                        section = "    <url>\n"
+                        section = section + "        <loc>" + site_url + (root[len(static_path):]+"\\"+filename).replace("\\","/") + "</loc>\n"
+                        section = section + "        <lastmod>%04d-%02d-%02d</lastmod>\n" % (date_today.year, date_today.month, date_today.day)
+                        section = section + "        <changefreq>monthly</changefreq>\n"
+                        section = section + "    </url>\n"
+                        site_map = site_map + section
+                        
+            site_map = site_map_header + site_map + site_map_footer
+            with open(static_path + "\\sitemap.xml", 'w') as file_sitemap:
+                file_sitemap.write(site_map)
+                file_sitemap.close()
+
+        if arguments["--rss-summaries"]:
             original_escape_cdata = ElementTree._escape_cdata
             def _escape_cdata(text, encoding):
                 if "<![CDATA[" in text:
